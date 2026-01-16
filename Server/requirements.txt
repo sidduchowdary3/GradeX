@@ -65,3 +65,4 @@ python-dotenv
 pytesseract
 google-genai
 opencv-python
+scikit-image

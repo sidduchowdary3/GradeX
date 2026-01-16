@@ -17,60 +17,62 @@ from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from pymongo import MongoClient
 import cv2
 import numpy as np
-from io import BytesIO
-
+from skimage.metrics import structural_similarity as ssim
 from dotenv import load_dotenv
-from datetime import datetime  # ✅ NEW
+from datetime import datetime
+
 
 # ------------------------
-# Helper Function
+# Flask Setup
 # ------------------------
-def clean_for_handwriting(pil_img):
-    img = np.array(pil_img)
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    blur = cv2.GaussianBlur(gray, (3, 3), 0)
-
-    thresh = cv2.adaptiveThreshold(
-        blur, 255,
-        cv2.ADAPTIVE_THRESH_MEAN_C,
-        cv2.THRESH_BINARY_INV,
-        15, 4
-    )
-    return Image.fromarray(thresh)
-
-processing_mode = None
-
 app = Flask(__name__)
 CORS(app)
 
+UPLOAD_FOLDER = "uploads"
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+
+
 # ------------------------
-# MongoDB Configuration ✅ (Single DB)
+# MongoDB Setup ✅ (Single Database)
 # ------------------------
 client = MongoClient("mongodb://localhost:27017/")
-db = client["gradex_db"]  # ✅ only one database
-reports_collection = db["reports"]  # ✅ reports collection
+db = client["gradex_db"]
+reports_collection = db["reports"]
+
 
 # ------------------------
-# NLTK resources
+# Globals
 # ------------------------
-nltk.download('punkt', quiet=True)
-nltk.download('stopwords', quiet=True)
-nltk.download('wordnet', quiet=True)
-nltk.download('punkt_tab', quiet=True)
+processing_mode = None
+teacher_answers = []
+exam_name = None
+
+# ✅ Store page images
+teacher_page_images = {}
+student_page_images = {}
+
 
 # ------------------------
-# NLP tools
+# NLTK Setup
 # ------------------------
+nltk.download("punkt", quiet=True)
+nltk.download("stopwords", quiet=True)
+nltk.download("wordnet", quiet=True)
+nltk.download("punkt_tab", quiet=True)
+
 lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words("english"))
 negation_words = {"not", "never", "no", "none", "cannot", "n't"}
 
+
 # ------------------------
-# ENV + Models
+# Load ENV + Models
 # ------------------------
 load_dotenv()
 
 sbert_model = SentenceTransformer("all-MiniLM-L6-v2")
+
 gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 cross_encoder_model = AutoModelForSequenceClassification.from_pretrained(
@@ -80,25 +82,40 @@ cross_encoder_tokenizer = AutoTokenizer.from_pretrained(
     "cross-encoder/stsb-roberta-large"
 )
 
-UPLOAD_FOLDER = "uploads"
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
-teacher_answers = {}
-exam_name = None
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# ------------------------
+# Image Preprocessing
+# ------------------------
+def clean_for_handwriting(pil_img):
+    img = np.array(pil_img)
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
+
+    thresh = cv2.adaptiveThreshold(
+        blur,
+        255,
+        cv2.ADAPTIVE_THRESH_MEAN_C,
+        cv2.THRESH_BINARY_INV,
+        15,
+        4,
+    )
+
+    return Image.fromarray(thresh)
 
 
 # ------------------------
-# Text processing
+# NLP Similarity
 # ------------------------
 def preprocess_text(text):
     tokens = word_tokenize(text.lower())
     tokens = [lemmatizer.lemmatize(word) for word in tokens if word not in stop_words]
     return " ".join(tokens)
 
+
 def contains_negation(text):
     tokens = set(word_tokenize(text.lower()))
     return any(word in negation_words for word in tokens)
+
 
 def bert_similarity(student_answer, original_answer):
     student_answer_clean = preprocess_text(student_answer)
@@ -106,30 +123,34 @@ def bert_similarity(student_answer, original_answer):
 
     emb1 = sbert_model.encode(student_answer_clean, convert_to_tensor=True)
     emb2 = sbert_model.encode(original_answer_clean, convert_to_tensor=True)
+
     similarity = util.pytorch_cos_sim(emb1, emb2).item() * 100
 
     inputs = cross_encoder_tokenizer(
-        student_answer_clean, original_answer_clean,
-        return_tensors="pt", truncation=True
+        student_answer_clean,
+        original_answer_clean,
+        return_tensors="pt",
+        truncation=True,
     )
+
     with torch.no_grad():
         logits = cross_encoder_model(**inputs).logits
 
-    context_score = torch.sigmoid(logits).item() * 100
+    contextual_score = torch.sigmoid(logits).item() * 100
 
-    # negation penalty
+    # ✅ negation penalty
     student_has_negation = contains_negation(student_answer)
     original_has_negation = contains_negation(original_answer)
 
     if student_has_negation != original_has_negation:
         similarity *= 0.5
-        context_score *= 0.5
+        contextual_score *= 0.5
 
-    return similarity, context_score
+    return similarity, contextual_score
 
 
 # ------------------------
-# OCR Extraction with Gemini
+# OCR Using Gemini
 # ------------------------
 def extract_text_from_image(image):
     try:
@@ -139,8 +160,8 @@ def extract_text_from_image(image):
                 "You are an OCR engine. Read this handwritten answer sheet. "
                 "Extract ALL visible handwritten text exactly as written. "
                 "Do NOT summarize. Do NOT explain. Output only the raw text.",
-                image
-            ]
+                image,
+            ],
         )
 
         text = response.text.strip()
@@ -155,19 +176,25 @@ def extract_text_from_image(image):
         return "OCR_ERROR"
 
 
+# ------------------------
+# Extract PDF text + store page images ✅
+# ------------------------
 def extract_text_from_pdf(pdf_path):
+    global processing_mode, teacher_page_images, student_page_images
+
     doc = fitz.open(pdf_path)
     extracted_text_list = []
 
     for i, page in enumerate(doc):
         try:
-            print(f"Processing Page {i + 1}...")
             pix = page.get_pixmap(matrix=fitz.Matrix(4, 4))
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 
             if processing_mode == "teacher":
+                teacher_page_images[i] = img
                 text = pytesseract.image_to_string(img).strip()
             else:
+                student_page_images[i] = img
                 clean_img = clean_for_handwriting(img)
                 text = extract_text_from_image(clean_img)
 
@@ -182,151 +209,201 @@ def extract_text_from_pdf(pdf_path):
 
 
 # ------------------------
-# (Optional) Old DB APIs (still kept, but not needed now)
+# ✅ Image Similarity + Image Marks
 # ------------------------
-@app.route('/mongodb/databases', methods=['GET'])
-def get_databases():
-    try:
-        databases = client.list_database_names()
-        return jsonify({"databases": databases}), 200
-    except Exception as e:
-        print(f"Error fetching databases: {e}")
-        return jsonify({"error": "Failed to fetch databases"}), 500
+def image_similarity(img1, img2):
+    img1 = cv2.cvtColor(np.array(img1), cv2.COLOR_RGB2GRAY)
+    img2 = cv2.cvtColor(np.array(img2), cv2.COLOR_RGB2GRAY)
+
+    img1 = cv2.resize(img1, (500, 500))
+    img2 = cv2.resize(img2, (500, 500))
+
+    score, _ = ssim(img1, img2, full=True)
+    return score
 
 
-@app.route('/mongodb/collection-data', methods=['POST'])
-def get_collection_data():
-    try:
-        data = request.json
-        database_name = data.get("database")
+def image_marks(score):
+    if score > 0.85:
+        return 10
+    elif score > 0.70:
+        return 8
+    elif score > 0.55:
+        return 6
+    elif score > 0.40:
+        return 4
+    else:
+        return 0
 
-        if not database_name:
-            return jsonify({"error": "Database name is required"}), 400
 
-        db_any = client[database_name]
-        collection = db_any["reports"]
-
-        collection_data = list(collection.find({}, {"_id": 0}))
-        return jsonify({"collection_name": "reports", "data": collection_data}), 200
-
-    except Exception as e:
-        print(f"Error fetching collection data: {e}")
-        return jsonify({"error": "Failed to fetch collection data"}), 500
-
+# ==========================================================
+# ✅ ROUTES
+# ==========================================================
 
 # ------------------------
-# Teacher upload
+# Teacher Upload ✅
 # ------------------------
-@app.route('/upload/teacher', methods=['POST'])
+@app.route("/upload/teacher", methods=["POST"])
 def upload_teacher_pdf():
     global processing_mode, exam_name, teacher_answers
+    global teacher_page_images, student_page_images
 
-    if 'pdf' not in request.files or 'examName' not in request.form:
+    # ✅ Reset old data
+    teacher_page_images.clear()
+    student_page_images.clear()
+    teacher_answers = []
+
+    if "pdf" not in request.files or "examName" not in request.form:
         return jsonify({"error": "Missing file or exam name"}), 400
 
-    exam_name = request.form['examName']  # ✅ store current exam name
+    exam_name = request.form["examName"]
+    pdf_file = request.files["pdf"]
 
-    pdf_file = request.files['pdf']
     pdf_path = os.path.join(UPLOAD_FOLDER, pdf_file.filename)
     pdf_file.save(pdf_path)
 
     processing_mode = "teacher"
     teacher_answers = extract_text_from_pdf(pdf_path)
 
-    return jsonify({
-        "message": "Teacher answers uploaded",
-        "examName": exam_name,
-        "pages": len(teacher_answers)
-    })
-
-
-# ------------------------
-# Student upload (HTML render route - unchanged)
-# ------------------------
-@app.route('/upload/student', methods=['POST'])
-def upload_student_pdf():
-    global processing_mode
-    processing_mode = "student"
-
-    if 'pdf' not in request.files:
-        return jsonify({"error": "No file provided"}), 400
-
-    pdf_file = request.files['pdf']
-    pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], pdf_file.filename)
-    pdf_file.save(pdf_path)
-
-    extracted_answers = extract_text_from_pdf(pdf_path)
-
-    comparisons = {}
-    for page, (student_text, teacher_text) in enumerate(zip(extracted_answers, teacher_answers), start=1):
-        similarity_score, contextual_score = bert_similarity(student_text, teacher_text)
-
-        sbert_normalized = similarity_score / 100
-        cross_encoder_normalized = contextual_score / 100
-
-        W1 = 0.4
-        W2 = 0.6
-
-        total_score = 10 * ((W1 * sbert_normalized) + (W2 * cross_encoder_normalized))
-
-        comparisons[page] = {
-            "student_text": student_text,
-            "teacher_text": teacher_text,
-            "similarity_score": similarity_score,
-            "contextual_score": contextual_score,
-            "total_score": round(total_score, 0)
+    return jsonify(
+        {
+            "message": "Teacher answers uploaded successfully ✅",
+            "examName": exam_name,
+            "pages": len(teacher_answers),
         }
-
-    return render_template("result.html", comparisons=comparisons)
+    )
 
 
 # ------------------------
-# Student upload (API for React)
+# Student Upload (API for React) ✅ TEXT + IMAGE scoring
 # ------------------------
-@app.route('/upload/student_api', methods=['POST'])
+@app.route("/upload/student_api", methods=["POST"])
 def upload_student_pdf_api():
-    global processing_mode
+    global processing_mode, teacher_answers
+    global student_page_images
+
     processing_mode = "student"
 
-    student_name = request.form.get('studentName')
-    roll_number = request.form.get('rollNumber')
+    student_name = request.form.get("studentName")
+    roll_number = request.form.get("rollNumber")
 
-    if 'pdf' not in request.files:
+    if not teacher_answers or len(teacher_answers) == 0:
+        return jsonify({"error": "Teacher key not uploaded yet"}), 400
+
+    if "pdf" not in request.files:
         return jsonify({"error": "No file"}), 400
 
-    pdf_file = request.files['pdf']
+    # ✅ reset student images each time
+    student_page_images.clear()
+
+    pdf_file = request.files["pdf"]
     pdf_path = os.path.join(UPLOAD_FOLDER, pdf_file.filename)
     pdf_file.save(pdf_path)
 
     extracted_answers = extract_text_from_pdf(pdf_path)
 
     comparisons = {}
-    for page, (student_text, teacher_text) in enumerate(zip(extracted_answers, teacher_answers), 1):
+
+    # ✅ compare page-wise
+    for page, (student_text, teacher_text) in enumerate(
+        zip(extracted_answers, teacher_answers), start=1
+    ):
+        # ---------------- TEXT evaluation ----------------
         similarity_score, contextual_score = bert_similarity(student_text, teacher_text)
 
-        sbert_norm = similarity_score / 100
-        context_norm = contextual_score / 100
-        W1, W2 = 0.4, 0.6
+        text_score = 10 * (
+            0.4 * (similarity_score / 100) + 0.6 * (contextual_score / 100)
+        )
 
-        total_score = 10 * (W1 * sbert_norm + W2 * context_norm)
+        # ---------------- IMAGE evaluation ----------------
+        teacher_img = teacher_page_images.get(page - 1)
+        student_img = student_page_images.get(page - 1)
+
+        if teacher_img is not None and student_img is not None:
+            img_sim = image_similarity(student_img, teacher_img)
+            img_score = image_marks(img_sim)
+        else:
+            img_sim = 0
+            img_score = 0
+
+        # ---------------- FINAL score ----------------
+        final_score = round((0.7 * text_score) + (0.3 * img_score), 0)
 
         comparisons[page] = {
             "student_text": student_text,
             "teacher_text": teacher_text,
+
+            # ✅ show both marks clearly
             "similarity_score": round(similarity_score, 1),
             "contextual_score": round(contextual_score, 1),
-            "total_score": round(total_score, 0)
+
+            "text_marks": round(text_score, 1),
+            "image_similarity": round(img_sim, 3),
+            "image_marks": img_score,
+
+            # ✅ Final
+            "total_score": final_score,
         }
 
-    return jsonify({
-        "student_name": student_name,
-        "roll_number": roll_number,
-        "comparisons": comparisons
-    })
+    return jsonify(
+        {
+            "student_name": student_name,
+            "roll_number": roll_number,
+            "comparisons": comparisons,
+        }
+    )
 
 
 # ------------------------
-# ✅ Save Report (Single DB + exam_name + created_at)
+# (Optional) Student Upload HTML page (kept)
+# ------------------------
+@app.route("/upload/student", methods=["POST"])
+def upload_student_pdf():
+    global processing_mode
+    processing_mode = "student"
+
+    if "pdf" not in request.files:
+        return jsonify({"error": "No file provided"}), 400
+
+    pdf_file = request.files["pdf"]
+    pdf_path = os.path.join(app.config["UPLOAD_FOLDER"], pdf_file.filename)
+    pdf_file.save(pdf_path)
+
+    extracted_answers = extract_text_from_pdf(pdf_path)
+
+    comparisons = {}
+    for page, (student_text, teacher_text) in enumerate(
+        zip(extracted_answers, teacher_answers), start=1
+    ):
+        similarity_score, contextual_score = bert_similarity(student_text, teacher_text)
+
+        text_score = 10 * (
+            0.4 * (similarity_score / 100) + 0.6 * (contextual_score / 100)
+        )
+
+        teacher_img = teacher_page_images.get(page - 1)
+        student_img = student_page_images.get(page - 1)
+
+        if teacher_img is not None and student_img is not None:
+            img_sim = image_similarity(student_img, teacher_img)
+            img_score = image_marks(img_sim)
+        else:
+            img_score = 0
+
+        final_score = round((0.7 * text_score) + (0.3 * img_score), 0)
+
+        comparisons[page] = {
+            "student_text": student_text,
+            "teacher_text": teacher_text,
+            "text_marks": round(text_score, 1),
+            "image_marks": img_score,
+            "final_score": final_score,
+        }
+
+    return render_template("result.html", comparisons=comparisons)
+
+
+# ------------------------
+# ✅ Save Report (Single DB + exam_name + created_at + no duplicates)
 # ------------------------
 @app.route("/save-report", methods=["POST"])
 def save_report():
@@ -337,11 +414,11 @@ def save_report():
         data["exam_name"] = exam_name if exam_name else "Unknown Exam"
         data["created_at"] = datetime.utcnow().isoformat()
 
-        # ✅ unique key: exam_name + roll_number
+        # ✅ Prevent duplicates: same exam + roll number will update
         reports_collection.update_one(
             {"exam_name": data["exam_name"], "roll_number": data["roll_number"]},
             {"$set": data},
-            upsert=True
+            upsert=True,
         )
 
         return jsonify({"message": "Report saved successfully ✅"}), 200
@@ -350,15 +427,14 @@ def save_report():
         print(f"Error saving report: {e}")
         return jsonify({"error": "Failed to save the report"}), 500
 
+
 # ------------------------
-# ✅ Fetch Reports (sorted by latest first)
+# ✅ Fetch Reports (Sorted latest first)
 # ------------------------
 @app.route("/reports", methods=["GET"])
 def get_reports():
     try:
-        reports = list(
-            reports_collection.find({}, {"_id": 0}).sort("created_at", -1)
-        )
+        reports = list(reports_collection.find({}, {"_id": 0}).sort("created_at", -1))
         return jsonify(reports), 200
     except Exception as e:
         print(f"Error fetching reports: {e}")
@@ -370,10 +446,19 @@ def get_reports():
 # ------------------------
 @app.route("/reset/teacher", methods=["GET"])
 def reset_teacher():
-    global teacher_answers
-    teacher_answers = None
-    return jsonify({"message": "Teacher answers reset successfully"})
+    global teacher_answers, exam_name
+    global teacher_page_images, student_page_images
+
+    teacher_answers = []
+    exam_name = None
+    teacher_page_images.clear()
+    student_page_images.clear()
+
+    return jsonify({"message": "Teacher answers reset successfully ✅"})
 
 
-if __name__ == '__main__':
+# ------------------------
+# Run
+# ------------------------
+if __name__ == "__main__":
     app.run(debug=True)
