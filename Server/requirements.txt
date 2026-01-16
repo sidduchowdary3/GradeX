@@ -62,3 +62,6 @@ uritemplate==4.1.1
 urllib3==2.3.0
 Werkzeug==3.1.3
 python-dotenv
+pytesseract
+google-genai
+opencv-python

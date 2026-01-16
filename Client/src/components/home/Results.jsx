@@ -1,145 +1,359 @@
-import React from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Award,
+  FileDown,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+} from "lucide-react";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
 function Results({ student_name, roll_number, comparisons }) {
+  const [isSaved, setIsSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
 
-  // Calculate cumulative marks
-  const cumulativeMarks = Object.values(comparisons).reduce(
-    (total, result) => total + result.total_score,
-    0
-  );
+  const reportRef = useRef(null);
 
-  const maxTotalMarks = Object.keys(comparisons).length * 10;
-  // Calculate percentage
-  const percentage = ((cumulativeMarks / maxTotalMarks) * 100).toFixed(2);
+  // ✅ Calculations
+  const { cumulativeMarks, maxTotalMarks, percentage } = useMemo(() => {
+    const cumulative = Object.values(comparisons).reduce(
+      (total, result) => total + (result.total_score || 0),
+      0
+    );
 
-  const handleSaveReport = async () => {
-    // Disable button after clicked to avoid repeated clicks
+    const maxTotal = Object.keys(comparisons).length * 10;
+    const percent =
+      maxTotal > 0 ? ((cumulative / maxTotal) * 100).toFixed(2) : "0.00";
+
+    return {
+      cumulativeMarks: cumulative,
+      maxTotalMarks: maxTotal,
+      percentage: percent,
+    };
+  }, [comparisons]);
+
+  // ✅ Report payload
+  const reportData = useMemo(() => {
     const pageMarks = Object.entries(comparisons).map(([page, result]) => ({
       page,
       marks: result.total_score,
     }));
 
-    const reportData = {
+    return {
       student_name,
       roll_number,
       total_marks: cumulativeMarks,
       max_marks: maxTotalMarks,
       percentage,
-      page_marks: pageMarks, // Add page-wise marks here
+      page_marks: pageMarks,
       details: comparisons,
     };
+  }, [student_name, roll_number, cumulativeMarks, maxTotalMarks, percentage, comparisons]);
+
+  // ✅ Auto save once
+  useEffect(() => {
+    const autoSave = async () => {
+      if (!student_name || !roll_number) return;
+      if (!comparisons || Object.keys(comparisons).length === 0) return;
+      if (isSaved || saving) return;
+
+      setSaving(true);
+
+      try {
+        const response = await fetch("http://127.0.0.1:5000/save-report", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(reportData),
+        });
+
+        if (response.ok) {
+          setIsSaved(true);
+        } else {
+          console.log("Failed to auto-save report");
+        }
+      } catch (error) {
+        console.error("Auto-save error:", error);
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    autoSave();
+  }, [student_name, roll_number, comparisons, reportData, isSaved, saving]);
+
+  // ✅ PDF Download
+  const handleDownloadPDF = async () => {
+    if (!reportRef.current) return;
 
     try {
-      const response = await fetch("http://127.0.0.1:5000/save-report", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(reportData),
+      const canvas = await html2canvas(reportRef.current, {
+        scale: 2,
+        useCORS: true,
       });
 
-      if (response.ok) {
-        alert("Report successfully saved!");
-      } else {
-        alert("Failed to save the report.");
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF("p", "mm", "a4");
+
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
+
+      const imgWidth = pageWidth;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "PNG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
       }
-    } catch (error) {
-      console.error("Error saving report:", error);
-      alert("An error occurred while saving the report.");
+
+      pdf.save(`GradeX_Report_${roll_number}.pdf`);
+    } catch (err) {
+      console.error(err);
+      alert("PDF download failed. Try again.");
     }
   };
 
   return (
-    <div className="p-6 space-y-8 text-gray-800 font-sans">
-      <h2 className="text-2xl font-semibold mb-4">Evaluation Results</h2>
-      {Object.entries(comparisons).map(([page, result]) => (
-        <div key={page} className="mb-8">
-          <h3 className="text-xl font-semibold mb-4">Question {page}</h3>
-          <table className="w-full table-auto border-collapse border border-gray-300">
-            <thead>
-              <tr>
-                <th className="p-3 text-center bg-gray-100">Student Text</th>
-                <th className="p-3 text-center bg-gray-100">Teacher Text</th>
-                <th className="p-3 text-center bg-gray-100">Similarity Score</th>
-                <th className="p-3 text-center bg-gray-100">Contextual Score</th>
-                <th className="p-3 text-center bg-gray-100">Marks</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="p-3 text-center">{result.student_text}</td>
-                <td className="p-3 text-center">{result.teacher_text}</td>
-                <td className="p-3 text-center">
-                  <div className="flex items-center gap-2">
-                    <progress
-                      className="w-24 h-2"
-                      max="100"
-                      value={result.similarity_score}
-                    />
-                    <span>{result.similarity_score.toFixed(2)}%</span>
-                  </div>
-                </td>
-                <td className="p-3 text-center">
-                  <div className="flex items-center gap-2">
-                    <progress
-                      className="w-24 h-2"
-                      max="100"
-                      value={result.contextual_score}
-                    />
-                    <span>{result.contextual_score.toFixed(2)}%</span>
-                  </div>
-                </td>
-                <td className="p-3 text-center">{result.total_score}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      ))}
+    <div className="space-y-8 text-gray-900">
+      {/* ✅ REPORT AREA (used for PDF export) */}
+      <div ref={reportRef} className="space-y-6">
+        {/* Summary Card */}
+        <div className="bg-white/70 backdrop-blur-xl border border-white/30 rounded-3xl shadow-lg p-8">
+          <div className="flex items-start justify-between flex-wrap gap-6">
+            {/* Left */}
+            <div>
+              <h2 className="text-2xl sm:text-3xl font-extrabold flex items-center gap-2">
+                <Award className="w-7 h-7 text-indigo-600" />
+                Student Report
+              </h2>
 
-      {/* Enhanced Report Section */}
-      <div className="bg-gray-100 p-6 rounded-lg shadow-md">
-        <h1 className="text-2xl font-semibold mb-4">Student Report</h1>
-        <div className="flex flex-wrap gap-6">
-          <div className="flex-1">
-            <p className="text-lg mb-2">
-              <strong>Student Name:</strong> {student_name}
-            </p>
-            <p className="text-lg mb-2">
-              <strong>Roll Number:</strong> {roll_number}
-            </p>
-            <p className="text-lg mb-2">
-              <strong>Total Marks:</strong>{" "}
-              <span className="text-blue-600 font-semibold">
-                {cumulativeMarks} / {maxTotalMarks}
-              </span>
-            </p>
-            <p className="text-lg mb-4">
-              <strong>Total Percentage:</strong>{" "}
-              <span className="text-blue-600 font-semibold">{percentage}%</span>
-            </p>
-          </div>
+              <p className="text-gray-600 mt-2">
+                AI evaluation generated by GradeX.
+              </p>
 
-          <div className="flex-1 text-center">
-            <h4 className="text-xl mb-4">Overall Performance</h4>
-            <div className="flex flex-col items-center">
-              <progress
-                className="w-64 h-3 bg-gray-300 rounded-full"
-                max="100"
-                value={percentage}
-              />
-              <span className="mt-2 text-2xl font-bold text-blue-600">{percentage}%</span>
+              {/* Saved Status */}
+              <div className="mt-4">
+                {saving && (
+                  <p className="text-sm text-gray-500">
+                    Saving report to database...
+                  </p>
+                )}
+
+                {isSaved && (
+                  <p className="text-sm font-semibold text-green-600 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Report saved successfully ✅
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-5 space-y-2 text-sm sm:text-base">
+                <p>
+                  <span className="font-semibold text-gray-700">Student Name:</span>{" "}
+                  {student_name}
+                </p>
+                <p>
+                  <span className="font-semibold text-gray-700">Roll Number:</span>{" "}
+                  {roll_number}
+                </p>
+                <p>
+                  <span className="font-semibold text-gray-700">Total Marks:</span>{" "}
+                  <span className="font-extrabold text-indigo-600">
+                    {cumulativeMarks} / {maxTotalMarks}
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            {/* Right */}
+            <div className="min-w-[260px] w-full sm:w-auto">
+              <p className="text-sm font-semibold text-gray-700 mb-2 text-center">
+                Overall Performance
+              </p>
+
+              <div className="bg-gray-100 rounded-2xl p-6 text-center border border-gray-200">
+                <div className="text-4xl font-extrabold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                  {percentage}%
+                </div>
+
+                <div className="mt-4">
+                  <div className="h-3 w-full bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-indigo-600 to-purple-600"
+                      style={{ width: `${percentage}%` }}
+                    />
+                  </div>
+                </div>
+
+                <p className="text-xs text-gray-500 mt-3">
+                  Performance score based on AI comparison
+                </p>
+              </div>
             </div>
           </div>
         </div>
-        <div className="flex justify-center">
-          <button
-            className="save-report-btn text-white text-2xl font-bold px-6 py-3 cursor-pointer bg-green-700 rounded-lg"
-            onClick={handleSaveReport}
-          >
-            Save Report
-          </button>
+
+        {/* Page-wise marks */}
+        <div className="bg-white/70 backdrop-blur-xl border border-white/30 rounded-3xl shadow-md p-8">
+          <h3 className="text-xl font-extrabold mb-5">Page-wise Marks</h3>
+
+          <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white">
+            <table className="min-w-full table-auto border-collapse">
+              <thead>
+                <tr className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+                  <th className="py-3 px-6 text-center text-sm font-bold uppercase">
+                    Page
+                  </th>
+                  <th className="py-3 px-6 text-center text-sm font-bold uppercase">
+                    Marks
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {Object.entries(comparisons).map(([page, result]) => (
+                  <tr key={page} className="border-t hover:bg-indigo-50/40 transition">
+                    <td className="py-3 px-6 text-center font-semibold">{page}</td>
+                    <td className="py-3 px-6 text-center">
+                      <span className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-extrabold">
+                        {result.total_score}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
+
+      {/* ✅ Buttons (IMPORTANT: type="button") */}
+      <div className="flex flex-col sm:flex-row gap-4 justify-center">
+        <button
+          type="button"
+          onClick={handleDownloadPDF}
+          className="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold shadow-md hover:opacity-95 transition flex items-center justify-center gap-2"
+        >
+          <FileDown className="w-5 h-5" />
+          Download Report (PDF)
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowDetails((prev) => !prev)}
+          className="px-6 py-3 rounded-xl bg-white text-gray-800 font-semibold shadow-sm border border-gray-200 hover:bg-gray-50 transition flex items-center justify-center gap-2"
+        >
+          {showDetails ? (
+            <>
+              <ChevronUp className="w-5 h-5" />
+              Hide Detailed Analysis
+            </>
+          ) : (
+            <>
+              <ChevronDown className="w-5 h-5" />
+              View Detailed Analysis
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* ✅ Detailed Analysis */}
+      {showDetails && (
+        <div className="space-y-8">
+          {Object.entries(comparisons).map(([page, result]) => (
+            <div
+              key={page}
+              className="bg-white/70 backdrop-blur-xl border border-white/30 rounded-3xl shadow-md p-8"
+            >
+              <h3 className="text-xl sm:text-2xl font-extrabold mb-6">
+                Question {page} — Detailed Analysis
+              </h3>
+
+              <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white">
+                <table className="min-w-full table-auto border-collapse">
+                  <thead>
+                    <tr className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+                      <th className="py-3 px-5 text-center text-sm font-bold uppercase">
+                        Student Text
+                      </th>
+                      <th className="py-3 px-5 text-center text-sm font-bold uppercase">
+                        Teacher Text
+                      </th>
+                      <th className="py-3 px-5 text-center text-sm font-bold uppercase">
+                        Similarity
+                      </th>
+                      <th className="py-3 px-5 text-center text-sm font-bold uppercase">
+                        Context
+                      </th>
+                      <th className="py-3 px-5 text-center text-sm font-bold uppercase">
+                        Marks
+                      </th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    <tr className="border-t hover:bg-indigo-50/40 transition">
+                      <td className="py-4 px-5 text-sm text-gray-700">
+                        {result.student_text || "N/A"}
+                      </td>
+
+                      <td className="py-4 px-5 text-sm text-gray-700">
+                        {result.teacher_text || "N/A"}
+                      </td>
+
+                      {/* Similarity */}
+                      <td className="py-4 px-5 text-center">
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="h-2 w-28 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-indigo-600"
+                              style={{ width: `${result.similarity_score}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-semibold text-gray-700">
+                            {result.similarity_score.toFixed(2)}%
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Context */}
+                      <td className="py-4 px-5 text-center">
+                        <div className="flex flex-col items-center gap-2">
+                          <div className="h-2 w-28 bg-gray-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-purple-600"
+                              style={{ width: `${result.contextual_score}%` }}
+                            />
+                          </div>
+                          <span className="text-sm font-semibold text-gray-700">
+                            {result.contextual_score.toFixed(2)}%
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Marks */}
+                      <td className="py-4 px-5 text-center">
+                        <span className="px-3 py-1 rounded-lg bg-indigo-50 text-indigo-700 font-extrabold">
+                          {result.total_score}
+                        </span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

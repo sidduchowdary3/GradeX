@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 
-function TeacherUpload({ setIsTeacherUploaded }) {
+function TeacherUpload({ setIsTeacherUploaded, setLoading }) {
   const [uploading, setUploading] = useState(false);
   const [examName, setExamName] = useState("");
-  const [databases, setDatabases] = useState([]); // Default to empty array
+  const [databases, setDatabases] = useState([]);
   const [selectedDatabase, setSelectedDatabase] = useState("");
-  const [collectionData, setCollectionData] = useState([]); // Default to empty array
+  const [collectionData, setCollectionData] = useState([]);
   const [uniquePages, setUniquePages] = useState([]);
 
   const staticColumns = ["total_marks", "max_marks", "percentage"];
@@ -14,8 +14,10 @@ function TeacherUpload({ setIsTeacherUploaded }) {
   useEffect(() => {
     const fetchDatabases = async () => {
       try {
-        const response = await axios.get("http://127.0.0.1:5000/mongodb/databases");
-        setDatabases(response.data.databases || []); // Ensure it's an array
+        const response = await axios.get(
+          "http://127.0.0.1:5000/mongodb/databases"
+        );
+        setDatabases(response.data.databases || []);
       } catch (error) {
         console.error("Error fetching databases:", error);
       }
@@ -29,11 +31,14 @@ function TeacherUpload({ setIsTeacherUploaded }) {
       if (!selectedDatabase) return;
 
       try {
-        const response = await axios.post("http://127.0.0.1:5000/mongodb/collection-data", {
-          database: selectedDatabase,
-        });
-        const data = response.data.data || []; // Ensure it's an array
+        const response = await axios.post(
+          "http://127.0.0.1:5000/mongodb/collection-data",
+          { database: selectedDatabase }
+        );
+
+        const data = response.data.data || [];
         const pages = new Set();
+
         data.forEach((row) => {
           if (row.page_marks) {
             row.page_marks.forEach((markObj) => pages.add(markObj.page));
@@ -70,7 +75,7 @@ function TeacherUpload({ setIsTeacherUploaded }) {
       return;
     }
 
-    if (!examName) {
+    if (!examName.trim()) {
       alert("Please enter an exam name.");
       return;
     }
@@ -80,66 +85,89 @@ function TeacherUpload({ setIsTeacherUploaded }) {
     formData.append("examName", examName);
 
     setUploading(true);
+    if (setLoading) setLoading(true);
+
     try {
-      const response = await axios.post("http://127.0.0.1:5000/upload/teacher", formData);
+      const response = await axios.post(
+        "http://127.0.0.1:5000/upload/teacher",
+        formData
+      );
+
       console.log(response);
-      alert("KEY uploaded successfully!");
+      alert("Answer Key uploaded successfully ✅");
       setIsTeacherUploaded(true);
     } catch (error) {
       console.error(error);
-      alert("Error uploading KEY. Please try again.");
+      alert("Error uploading Answer Key. Please try again.");
     } finally {
       setUploading(false);
+      if (setLoading) setLoading(false);
     }
   };
 
   return (
-    <div className="space-y-6 max-w-3xl mx-auto p-6">
-      <div>
-        <label htmlFor="exam-name">Exam Name: </label>
-        <input
-          id="exam-name"
-          type="text"
-          className="border-3 border-gray-300 rounded-md px-3 py-2 w-full"
-          value={examName}
-          onChange={(e) => setExamName(e.target.value)}
-        />
+    <div className="space-y-8 max-w-4xl mx-auto">
+      {/* Exam + DB */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Exam Name */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Exam Name
+          </label>
+          <input
+            type="text"
+            placeholder="Eg: Mid-1 / Unit Test / Sem Exam"
+            className="w-full rounded-xl border border-gray-200 px-4 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            value={examName}
+            onChange={(e) => setExamName(e.target.value)}
+          />
+        </div>
+
+        {/* Database Select */}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">
+            Select Database
+          </label>
+          <select
+            value={selectedDatabase}
+            onChange={(e) => setSelectedDatabase(e.target.value)}
+            className="w-full rounded-xl border border-gray-200 px-4 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+          >
+            <option value="">-- Select --</option>
+            {databases.length > 0 ? (
+              databases.map((db, index) => (
+                <option key={index} value={db}>
+                  {db}
+                </option>
+              ))
+            ) : (
+              <option disabled>No databases available</option>
+            )}
+          </select>
+        </div>
       </div>
 
-      <div>
-        <label htmlFor="database-select">Select Database: </label>
-        <select
-          id="database-select"
-          value={selectedDatabase}
-          onChange={(e) => setSelectedDatabase(e.target.value)}
-        >
-          <option value="">-- Select --</option>
-          {databases.length > 0 ? (
-            databases.map((db, index) => (
-              <option key={index} value={db}>
-                {db}
-              </option>
-            ))
-          ) : (
-            <option disabled>No databases available</option>
-          )}
-        </select>
-      </div>
+      {/* Upload Box */}
+      <div className="bg-white/70 backdrop-blur-xl border border-white/30 rounded-3xl shadow-md p-8">
+        <h2 className="text-2xl sm:text-3xl font-extrabold text-gray-900 text-center mb-2">
+          Upload Answer Key
+        </h2>
+        <p className="text-center text-gray-600 mb-6">
+          PDF format only (Max 5MB)
+        </p>
 
-      <h2 className="text-3xl font-semibold text-gray-800 text-center">
-        Upload Answer Key
-      </h2>
-
-      <div className="flex justify-center">
-        <label className="w-full">
-          <div className="flex flex-col items-center justify-center py-8 px-6 border-2 border-dashed border-indigo-400 rounded-lg hover:border-indigo-500 transition-colors cursor-pointer bg-white">
-            <div className="space-y-2 text-center">
-              <p className="text-lg font-medium text-gray-700">
-                Upload Answer Key (PDF only)
+        <label className="block w-full cursor-pointer">
+          <div className="flex flex-col items-center justify-center py-10 px-6 border-2 border-dashed border-indigo-400/70 rounded-2xl hover:border-indigo-600 transition bg-white">
+            <div className="text-center space-y-1">
+              <p className="text-lg font-semibold text-gray-800">
+                Click to Upload Answer Key
               </p>
-              <p className="text-sm text-gray-500">File size up to 5MB</p>
+              <p className="text-sm text-gray-500">
+                Drag & drop also supported
+              </p>
             </div>
           </div>
+
           <input
             type="file"
             accept="application/pdf"
@@ -149,43 +177,89 @@ function TeacherUpload({ setIsTeacherUploaded }) {
         </label>
       </div>
 
+      {/* Uploading Overlay */}
       {uploading && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
-          <div className="bg-white p-6 rounded-xl shadow-lg text-center">
-            <h2 className="text-2xl font-semibold text-gray-800">Uploading...</h2>
-            <p className="text-lg text-gray-600">Please wait while we process your file.</p>
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex justify-center items-center z-50">
+          <div className="bg-white p-8 rounded-2xl shadow-xl text-center border border-gray-100">
+            <h2 className="text-2xl font-extrabold text-gray-900">
+              Uploading...
+            </h2>
+            <p className="text-gray-600 mt-2">
+              Please wait while we process the Answer Key.
+            </p>
           </div>
         </div>
       )}
 
+      {/* Collection Data */}
       {selectedDatabase && collectionData?.length > 0 && (
-        <div className="collection-table">
-          <h3>Collection Data</h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full table-auto border-collapse shadow-md rounded-lg overflow-hidden mx-auto">
+        <div className="bg-white/70 backdrop-blur-xl border border-white/30 rounded-3xl shadow-md p-8">
+          <h3 className="text-xl font-extrabold text-gray-900 mb-6">
+            Previous Evaluations
+          </h3>
+
+          <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white">
+            <table className="min-w-full table-auto border-collapse">
               <thead>
-                <tr className="bg-green-600 text-white">
-                  <th className="py-3 px-6 text-center text-sm font-bold uppercase">Roll Number</th>
-                  <th className="py-3 px-6 text-center text-sm font-bold uppercase">Student Name</th>
+                <tr className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
+                  <th className="py-3 px-6 text-center text-sm font-bold uppercase">
+                    Roll Number
+                  </th>
+                  <th className="py-3 px-6 text-center text-sm font-bold uppercase">
+                    Student Name
+                  </th>
+
                   {uniquePages?.map((page, index) => (
-                    <th key={`page-${page}-${index}`} className="py-3 px-6 text-center text-sm font-bold uppercase">Page {page} Marks</th>
+                    <th
+                      key={`page-${page}-${index}`}
+                      className="py-3 px-6 text-center text-sm font-bold uppercase"
+                    >
+                      Page {page}
+                    </th>
                   ))}
+
                   {staticColumns.map((col, index) => (
-                    <th key={index} className="py-3 px-6 text-center text-sm font-bold uppercase">{col.replace("_", " ")}</th>
+                    <th
+                      key={index}
+                      className="py-3 px-6 text-center text-sm font-bold uppercase"
+                    >
+                      {col.replace("_", " ")}
+                    </th>
                   ))}
                 </tr>
               </thead>
+
               <tbody>
                 {collectionData?.map((row, rowIndex) => (
-                  <tr key={rowIndex} className="border-t hover:bg-gray-100 transition-colors duration-300">
-                    <td className="py-3 px-6 text-center">{row.roll_number || "N/A"}</td>
-                    <td className="py-3 px-6 text-center">{row.student_name || "N/A"}</td>
+                  <tr
+                    key={rowIndex}
+                    className="border-t hover:bg-indigo-50/50 transition-colors"
+                  >
+                    <td className="py-3 px-6 text-center">
+                      {row.roll_number || "N/A"}
+                    </td>
+                    <td className="py-3 px-6 text-center">
+                      {row.student_name || "N/A"}
+                    </td>
+
                     {uniquePages?.map((page, pageIndex) => {
-                      const markObj = row.page_marks?.find((obj) => obj.page === page);
-                      return <td key={`page-${page}-${pageIndex}`} className="py-3 px-6 text-center">{markObj?.marks || "N/A"}</td>;
+                      const markObj = row.page_marks?.find(
+                        (obj) => obj.page === page
+                      );
+                      return (
+                        <td
+                          key={`page-${page}-${pageIndex}`}
+                          className="py-3 px-6 text-center"
+                        >
+                          {markObj?.marks ?? "N/A"}
+                        </td>
+                      );
                     })}
+
                     {staticColumns.map((col, colIndex) => (
-                      <td key={colIndex} className="py-3 px-6 text-center">{row[col] || "N/A"}</td>
+                      <td key={colIndex} className="py-3 px-6 text-center">
+                        {row[col] ?? "N/A"}
+                      </td>
                     ))}
                   </tr>
                 ))}
