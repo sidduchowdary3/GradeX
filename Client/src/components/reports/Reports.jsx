@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { FileText, RefreshCcw } from "lucide-react";
 
@@ -13,7 +13,7 @@ function Reports() {
       setReports(res.data || []);
     } catch (err) {
       console.error(err);
-      alert("Failed to fetch reports ❌ (Backend API missing or error)");
+      alert("Failed to fetch reports ❌");
     } finally {
       setLoading(false);
     }
@@ -22,6 +22,43 @@ function Reports() {
   useEffect(() => {
     fetchReports();
   }, []);
+
+  // ✅ Format date nicely
+  const formatDate = (value) => {
+    if (!value) return "N/A";
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return "N/A";
+    return d.toLocaleString();
+  };
+
+  // ✅ Remove duplicates (keep latest)
+  const uniqueSortedReports = useMemo(() => {
+    const map = new Map();
+
+    reports.forEach((r) => {
+      const exam = r.exam_name || r.examName || "N/A";
+      const roll = r.roll_number || "N/A";
+      const key = `${exam}__${roll}`;
+
+      const time = new Date(r.created_at || r.date || 0).getTime();
+
+      if (!map.has(key)) {
+        map.set(key, r);
+      } else {
+        const old = map.get(key);
+        const oldTime = new Date(old.created_at || old.date || 0).getTime();
+
+        // keep latest one
+        if (time > oldTime) map.set(key, r);
+      }
+    });
+
+    return Array.from(map.values()).sort((a, b) => {
+      const dateA = new Date(a.created_at || a.date || 0).getTime();
+      const dateB = new Date(b.created_at || b.date || 0).getTime();
+      return dateB - dateA;
+    });
+  }, [reports]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
@@ -34,7 +71,7 @@ function Reports() {
               Reports
             </h1>
             <p className="text-gray-600 mt-2">
-              View previously saved student evaluation reports.
+              View previously saved student evaluation reports exam-wise.
             </p>
           </div>
 
@@ -63,6 +100,12 @@ function Reports() {
                 <thead>
                   <tr className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
                     <th className="py-3 px-6 text-center text-sm font-bold uppercase">
+                      Exam
+                    </th>
+                    <th className="py-3 px-6 text-center text-sm font-bold uppercase">
+                      Date
+                    </th>
+                    <th className="py-3 px-6 text-center text-sm font-bold uppercase">
                       Roll Number
                     </th>
                     <th className="py-3 px-6 text-center text-sm font-bold uppercase">
@@ -81,31 +124,43 @@ function Reports() {
                 </thead>
 
                 <tbody>
-                  {reports.length === 0 ? (
+                  {uniqueSortedReports.length === 0 ? (
                     <tr>
-                      <td colSpan="5" className="py-10 text-center text-gray-600">
+                      <td colSpan="7" className="py-10 text-center text-gray-600">
                         No reports found yet ✅ <br />
                         Evaluate a student to generate a report.
                       </td>
                     </tr>
                   ) : (
-                    reports.map((r, index) => (
+                    uniqueSortedReports.map((r, index) => (
                       <tr
                         key={index}
                         className="border-t hover:bg-indigo-50/40 transition"
                       >
+                        <td className="py-3 px-6 text-center font-semibold text-gray-800">
+                          {r.exam_name || r.examName || "N/A"}
+                        </td>
+
+                        <td className="py-3 px-6 text-center text-sm text-gray-600">
+                          {formatDate(r.created_at || r.date)}
+                        </td>
+
                         <td className="py-3 px-6 text-center font-semibold">
                           {r.roll_number || "N/A"}
                         </td>
+
                         <td className="py-3 px-6 text-center">
                           {r.student_name || "N/A"}
                         </td>
+
                         <td className="py-3 px-6 text-center">
                           {r.total_marks ?? "N/A"}
                         </td>
+
                         <td className="py-3 px-6 text-center">
                           {r.max_marks ?? "N/A"}
                         </td>
+
                         <td className="py-3 px-6 text-center font-extrabold text-indigo-600">
                           {r.percentage ?? "N/A"}%
                         </td>

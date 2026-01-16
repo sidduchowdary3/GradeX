@@ -1,16 +1,42 @@
-import { useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import logo from "../../assets/logo.png";
 
 function Header() {
   const navigate = useNavigate();
+  const location = useLocation();
 
-  // ✅ Smooth scroll to footer
+  // ✅ Smooth scroll to footer (works only on Landing page)
   const handleAboutClick = (e) => {
     e.preventDefault();
-    const footer = document.getElementById("footer");
-    if (footer) {
-      footer.scrollIntoView({ behavior: "smooth" });
+
+    if (location.pathname !== "/") {
+      navigate("/");
+      setTimeout(() => {
+        const footer = document.getElementById("footer");
+        if (footer) footer.scrollIntoView({ behavior: "smooth" });
+      }, 300);
+      return;
     }
+
+    const footer = document.getElementById("footer");
+    if (footer) footer.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // ✅ Smooth scroll to features (works only on Landing page)
+  const handleFeaturesClick = (e) => {
+    e.preventDefault();
+
+    if (location.pathname !== "/") {
+      navigate("/");
+      setTimeout(() => {
+        const section = document.getElementById("features");
+        if (section) section.scrollIntoView({ behavior: "smooth" });
+      }, 300);
+      return;
+    }
+
+    const section = document.getElementById("features");
+    if (section) section.scrollIntoView({ behavior: "smooth" });
   };
 
   return (
@@ -19,13 +45,13 @@ function Header() {
         
         {/* ✅ Logo + Brand */}
         <div
-          className="flex items-center gap-2 cursor-pointer select-none"
+          className="flex items-center gap-3 cursor-pointer select-none"
           onClick={() => navigate("/")}
         >
           <img
             src={logo}
             alt="GradeX Logo"
-            className="w-16 h-16 object-contain"   // ✅ BIG LOGO
+            className="w-16 h-16 object-contain"
           />
 
           <div className="leading-tight">
@@ -38,23 +64,23 @@ function Header() {
           </div>
         </div>
 
-        {/* ✅ Right side (Nav + Button aligned right) */}
+        {/* ✅ Right Side */}
         <div className="flex items-center gap-10">
           
-          {/* ✅ Nav on right */}
+          {/* ✅ Nav */}
           <nav className="hidden md:flex items-center gap-10 text-sm font-medium text-white/70">
-            <a href="#features" className="hover:text-white transition">
-              Features
-            </a>
-
-            <a
-              href="#footer"
-              onClick={handleAboutClick}
+            <button
+              onClick={handleFeaturesClick}
               className="hover:text-white transition"
             >
-              About
-            </a>
-          </nav>
+              Features
+            </button>
+
+            <Link to="/reports" className="hover:text-white transition">
+              Reports
+            </Link>
+
+           </nav>
 
           {/* ✅ Button */}
           <button

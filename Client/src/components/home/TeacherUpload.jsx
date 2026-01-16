@@ -1,60 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import axios from "axios";
 
 function TeacherUpload({ setIsTeacherUploaded, setLoading }) {
   const [uploading, setUploading] = useState(false);
   const [examName, setExamName] = useState("");
-  const [databases, setDatabases] = useState([]);
-  const [selectedDatabase, setSelectedDatabase] = useState("");
-  const [collectionData, setCollectionData] = useState([]);
-  const [uniquePages, setUniquePages] = useState([]);
-
-  const staticColumns = ["total_marks", "max_marks", "percentage"];
-
-  useEffect(() => {
-    const fetchDatabases = async () => {
-      try {
-        const response = await axios.get(
-          "http://127.0.0.1:5000/mongodb/databases"
-        );
-        setDatabases(response.data.databases || []);
-      } catch (error) {
-        console.error("Error fetching databases:", error);
-      }
-    };
-
-    fetchDatabases();
-  }, []);
-
-  useEffect(() => {
-    const fetchCollectionData = async () => {
-      if (!selectedDatabase) return;
-
-      try {
-        const response = await axios.post(
-          "http://127.0.0.1:5000/mongodb/collection-data",
-          { database: selectedDatabase }
-        );
-
-        const data = response.data.data || [];
-        const pages = new Set();
-
-        data.forEach((row) => {
-          if (row.page_marks) {
-            row.page_marks.forEach((markObj) => pages.add(markObj.page));
-          }
-        });
-
-        setUniquePages([...pages].sort((a, b) => a - b));
-        setCollectionData(data);
-      } catch (error) {
-        console.error("Error fetching collection data:", error);
-        alert("Error fetching collection data. Please try again.");
-      }
-    };
-
-    fetchCollectionData();
-  }, [selectedDatabase]);
 
   const handleUpload = async (e) => {
     e.preventDefault();
@@ -107,44 +56,18 @@ function TeacherUpload({ setIsTeacherUploaded, setLoading }) {
 
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
-      {/* Exam + DB */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Exam Name */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Exam Name
-          </label>
-          <input
-            type="text"
-            placeholder="Eg: Mid-1 / Unit Test / Sem Exam"
-            className="w-full rounded-xl border border-gray-200 px-4 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-            value={examName}
-            onChange={(e) => setExamName(e.target.value)}
-          />
-        </div>
-
-        {/* Database Select */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-700 mb-2">
-            Select Database
-          </label>
-          <select
-            value={selectedDatabase}
-            onChange={(e) => setSelectedDatabase(e.target.value)}
-            className="w-full rounded-xl border border-gray-200 px-4 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
-          >
-            <option value="">-- Select --</option>
-            {databases.length > 0 ? (
-              databases.map((db, index) => (
-                <option key={index} value={db}>
-                  {db}
-                </option>
-              ))
-            ) : (
-              <option disabled>No databases available</option>
-            )}
-          </select>
-        </div>
+      {/* Exam Name */}
+      <div>
+        <label className="block text-sm font-semibold text-gray-700 mb-2">
+          Exam Name
+        </label>
+        <input
+          type="text"
+          placeholder="Eg: Mid-1 / Unit Test / Sem Exam"
+          className="w-full rounded-xl border border-gray-200 px-4 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+          value={examName}
+          onChange={(e) => setExamName(e.target.value)}
+        />
       </div>
 
       {/* Upload Box */}
@@ -187,84 +110,6 @@ function TeacherUpload({ setIsTeacherUploaded, setLoading }) {
             <p className="text-gray-600 mt-2">
               Please wait while we process the Answer Key.
             </p>
-          </div>
-        </div>
-      )}
-
-      {/* Collection Data */}
-      {selectedDatabase && collectionData?.length > 0 && (
-        <div className="bg-white/70 backdrop-blur-xl border border-white/30 rounded-3xl shadow-md p-8">
-          <h3 className="text-xl font-extrabold text-gray-900 mb-6">
-            Previous Evaluations
-          </h3>
-
-          <div className="overflow-x-auto rounded-2xl border border-gray-100 bg-white">
-            <table className="min-w-full table-auto border-collapse">
-              <thead>
-                <tr className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
-                  <th className="py-3 px-6 text-center text-sm font-bold uppercase">
-                    Roll Number
-                  </th>
-                  <th className="py-3 px-6 text-center text-sm font-bold uppercase">
-                    Student Name
-                  </th>
-
-                  {uniquePages?.map((page, index) => (
-                    <th
-                      key={`page-${page}-${index}`}
-                      className="py-3 px-6 text-center text-sm font-bold uppercase"
-                    >
-                      Page {page}
-                    </th>
-                  ))}
-
-                  {staticColumns.map((col, index) => (
-                    <th
-                      key={index}
-                      className="py-3 px-6 text-center text-sm font-bold uppercase"
-                    >
-                      {col.replace("_", " ")}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-
-              <tbody>
-                {collectionData?.map((row, rowIndex) => (
-                  <tr
-                    key={rowIndex}
-                    className="border-t hover:bg-indigo-50/50 transition-colors"
-                  >
-                    <td className="py-3 px-6 text-center">
-                      {row.roll_number || "N/A"}
-                    </td>
-                    <td className="py-3 px-6 text-center">
-                      {row.student_name || "N/A"}
-                    </td>
-
-                    {uniquePages?.map((page, pageIndex) => {
-                      const markObj = row.page_marks?.find(
-                        (obj) => obj.page === page
-                      );
-                      return (
-                        <td
-                          key={`page-${page}-${pageIndex}`}
-                          className="py-3 px-6 text-center"
-                        >
-                          {markObj?.marks ?? "N/A"}
-                        </td>
-                      );
-                    })}
-
-                    {staticColumns.map((col, colIndex) => (
-                      <td key={colIndex} className="py-3 px-6 text-center">
-                        {row[col] ?? "N/A"}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         </div>
       )}

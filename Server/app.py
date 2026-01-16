@@ -1,10 +1,11 @@
 from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
-import fitz  # PyMuPDF - pip install pymupdf
-import pytesseract  # pip install pytesseract + install tesseract binary
+import fitz  # PyMuPDF
+import pytesseract
 from PIL import Image
 import os
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "false"
+
 from google import genai
 import nltk
 import torch
@@ -18,20 +19,23 @@ import cv2
 import numpy as np
 from io import BytesIO
 
+from dotenv import load_dotenv
+from datetime import datetime  # ✅ NEW
+
+# ------------------------
+# Helper Function
+# ------------------------
 def clean_for_handwriting(pil_img):
     img = np.array(pil_img)
-
     gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    blur = cv2.GaussianBlur(gray, (3,3), 0)
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
 
-    # better for ink
     thresh = cv2.adaptiveThreshold(
         blur, 255,
         cv2.ADAPTIVE_THRESH_MEAN_C,
         cv2.THRESH_BINARY_INV,
         15, 4
     )
-
     return Image.fromarray(thresh)
 
 processing_mode = None
@@ -39,37 +43,54 @@ processing_mode = None
 app = Flask(__name__)
 CORS(app)
 
-# MongoDB Configuration
+# ------------------------
+# MongoDB Configuration ✅ (Single DB)
+# ------------------------
 client = MongoClient("mongodb://localhost:27017/")
+db = client["gradex_db"]  # ✅ only one database
+reports_collection = db["reports"]  # ✅ reports collection
 
-# Download necessary NLTK resources
+# ------------------------
+# NLTK resources
+# ------------------------
 nltk.download('punkt', quiet=True)
 nltk.download('stopwords', quiet=True)
 nltk.download('wordnet', quiet=True)
 nltk.download('punkt_tab', quiet=True)
 
-# Initialize NLP tools
+# ------------------------
+# NLP tools
+# ------------------------
 lemmatizer = WordNetLemmatizer()
 stop_words = set(stopwords.words("english"))
 negation_words = {"not", "never", "no", "none", "cannot", "n't"}
 
-# Load environment variables
-from dotenv import load_dotenv
+# ------------------------
+# ENV + Models
+# ------------------------
 load_dotenv()
 
-# Models
 sbert_model = SentenceTransformer("all-MiniLM-L6-v2")
 gemini_client = genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
-cross_encoder_model = AutoModelForSequenceClassification.from_pretrained("cross-encoder/stsb-roberta-large")
-cross_encoder_tokenizer = AutoTokenizer.from_pretrained("cross-encoder/stsb-roberta-large")
+cross_encoder_model = AutoModelForSequenceClassification.from_pretrained(
+    "cross-encoder/stsb-roberta-large"
+)
+cross_encoder_tokenizer = AutoTokenizer.from_pretrained(
+    "cross-encoder/stsb-roberta-large"
+)
 
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
 teacher_answers = {}
 exam_name = None
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
+
+# ------------------------
+# Text processing
+# ------------------------
 def preprocess_text(text):
     tokens = word_tokenize(text.lower())
     tokens = [lemmatizer.lemmatize(word) for word in tokens if word not in stop_words]
@@ -82,23 +103,34 @@ def contains_negation(text):
 def bert_similarity(student_answer, original_answer):
     student_answer_clean = preprocess_text(student_answer)
     original_answer_clean = preprocess_text(original_answer)
+
     emb1 = sbert_model.encode(student_answer_clean, convert_to_tensor=True)
     emb2 = sbert_model.encode(original_answer_clean, convert_to_tensor=True)
     similarity = util.pytorch_cos_sim(emb1, emb2).item() * 100
 
-    inputs = cross_encoder_tokenizer(student_answer_clean, original_answer_clean, return_tensors="pt", truncation=True)
+    inputs = cross_encoder_tokenizer(
+        student_answer_clean, original_answer_clean,
+        return_tensors="pt", truncation=True
+    )
     with torch.no_grad():
         logits = cross_encoder_model(**inputs).logits
+
     context_score = torch.sigmoid(logits).item() * 100
 
+    # negation penalty
     student_has_negation = contains_negation(student_answer)
     original_has_negation = contains_negation(original_answer)
+
     if student_has_negation != original_has_negation:
         similarity *= 0.5
         context_score *= 0.5
 
     return similarity, context_score
 
+
+# ------------------------
+# OCR Extraction with Gemini
+# ------------------------
 def extract_text_from_image(image):
     try:
         response = gemini_client.models.generate_content(
@@ -123,35 +155,35 @@ def extract_text_from_image(image):
         return "OCR_ERROR"
 
 
-
-
 def extract_text_from_pdf(pdf_path):
     doc = fitz.open(pdf_path)
     extracted_text_list = []
+
     for i, page in enumerate(doc):
         try:
             print(f"Processing Page {i + 1}...")
             pix = page.get_pixmap(matrix=fitz.Matrix(4, 4))
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-            
+
             if processing_mode == "teacher":
                 text = pytesseract.image_to_string(img).strip()
-            else:  # student: enhance + Gemini
+            else:
                 clean_img = clean_for_handwriting(img)
                 text = extract_text_from_image(clean_img)
-            
+
             extracted_text_list.append(text if text else "NO_TEXT_DETECTED")
+
         except Exception as e:
             print(f"Page {i+1} failed: {e}")
             extracted_text_list.append("EXTRACTION_ERROR")
+
     doc.close()
     return extracted_text_list
 
 
-
-from flask import request, jsonify
-import os
-
+# ------------------------
+# (Optional) Old DB APIs (still kept, but not needed now)
+# ------------------------
 @app.route('/mongodb/databases', methods=['GET'])
 def get_databases():
     try:
@@ -165,57 +197,54 @@ def get_databases():
 @app.route('/mongodb/collection-data', methods=['POST'])
 def get_collection_data():
     try:
-        # Extract database name from the request body
         data = request.json
         database_name = data.get("database")
 
-        # Validate the input
         if not database_name:
             return jsonify({"error": "Database name is required"}), 400
 
-        # Access the database and the 'reports' collection
-        db = client[database_name]
-        collection_name = "reports"
-        collection = db[collection_name]
+        db_any = client[database_name]
+        collection = db_any["reports"]
 
-        # Fetch all documents from the collection
-        collection_data = list(collection.find({}, {"_id": 0}))  # Exclude '_id' if not required in output
+        collection_data = list(collection.find({}, {"_id": 0}))
+        return jsonify({"collection_name": "reports", "data": collection_data}), 200
 
-        return jsonify({"collection_name": collection_name, "data": collection_data}), 200
     except Exception as e:
-        # Print error details and send a failure response
         print(f"Error fetching collection data: {e}")
         return jsonify({"error": "Failed to fetch collection data"}), 500
 
 
-
-# Routes remain mostly same, but fix upload_student_pdf_api scoring to match HTML
+# ------------------------
+# Teacher upload
+# ------------------------
 @app.route('/upload/teacher', methods=['POST'])
 def upload_teacher_pdf():
-    global processing_mode, exam_name
+    global processing_mode, exam_name, teacher_answers
+
     if 'pdf' not in request.files or 'examName' not in request.form:
         return jsonify({"error": "Missing file or exam name"}), 400
-    
-    exam_name = request.form['examName']
+
+    exam_name = request.form['examName']  # ✅ store current exam name
+
     pdf_file = request.files['pdf']
     pdf_path = os.path.join(UPLOAD_FOLDER, pdf_file.filename)
     pdf_file.save(pdf_path)
-    
+
     processing_mode = "teacher"
-    global teacher_answers
     teacher_answers = extract_text_from_pdf(pdf_path)
-    
-    return jsonify({"message": "Teacher answers uploaded", "examName": exam_name, "pages": len(teacher_answers)})
+
+    return jsonify({
+        "message": "Teacher answers uploaded",
+        "examName": exam_name,
+        "pages": len(teacher_answers)
+    })
 
 
-
+# ------------------------
+# Student upload (HTML render route - unchanged)
+# ------------------------
 @app.route('/upload/student', methods=['POST'])
 def upload_student_pdf():
-    """
-    Endpoint to upload a student's PDF, extract answers, and compare with teacher's answers.
-    """
-
-    # 🔥 VERY IMPORTANT — switch to student mode
     global processing_mode
     processing_mode = "student"
 
@@ -226,7 +255,6 @@ def upload_student_pdf():
     pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], pdf_file.filename)
     pdf_file.save(pdf_path)
 
-    # 🔥 This will now use Gemini OCR
     extracted_answers = extract_text_from_pdf(pdf_path)
 
     comparisons = {}
@@ -252,30 +280,36 @@ def upload_student_pdf():
     return render_template("result.html", comparisons=comparisons)
 
 
-
+# ------------------------
+# Student upload (API for React)
+# ------------------------
 @app.route('/upload/student_api', methods=['POST'])
 def upload_student_pdf_api():
     global processing_mode
     processing_mode = "student"
-    
+
     student_name = request.form.get('studentName')
     roll_number = request.form.get('rollNumber')
+
     if 'pdf' not in request.files:
         return jsonify({"error": "No file"}), 400
-    
+
     pdf_file = request.files['pdf']
     pdf_path = os.path.join(UPLOAD_FOLDER, pdf_file.filename)
     pdf_file.save(pdf_path)
-    
+
     extracted_answers = extract_text_from_pdf(pdf_path)
+
     comparisons = {}
     for page, (student_text, teacher_text) in enumerate(zip(extracted_answers, teacher_answers), 1):
         similarity_score, contextual_score = bert_similarity(student_text, teacher_text)
-        # Fixed: Consistent weighted scoring (0-10 scale)
+
         sbert_norm = similarity_score / 100
         context_norm = contextual_score / 100
         W1, W2 = 0.4, 0.6
+
         total_score = 10 * (W1 * sbert_norm + W2 * context_norm)
+
         comparisons[page] = {
             "student_text": student_text,
             "teacher_text": teacher_text,
@@ -283,25 +317,57 @@ def upload_student_pdf_api():
             "contextual_score": round(contextual_score, 1),
             "total_score": round(total_score, 0)
         }
-    
-    return jsonify({"student_name": student_name, "roll_number": roll_number, "comparisons": comparisons})
 
+    return jsonify({
+        "student_name": student_name,
+        "roll_number": roll_number,
+        "comparisons": comparisons
+    })
+
+
+# ------------------------
+# ✅ Save Report (Single DB + exam_name + created_at)
+# ------------------------
 @app.route("/save-report", methods=["POST"])
 def save_report():
     try:
+        global exam_name
         data = request.json
-        # Create/access a database named after the exam name
-        db = client[exam_name]
-        collection = db["reports"]  # Use a "reports" collection for the data
 
-        # Insert the report data into MongoDB
-        collection.insert_one(data)
-        return jsonify({"message": f"Report saved successfully in {exam_name} database!"}), 200
+        data["exam_name"] = exam_name if exam_name else "Unknown Exam"
+        data["created_at"] = datetime.utcnow().isoformat()
+
+        # ✅ unique key: exam_name + roll_number
+        reports_collection.update_one(
+            {"exam_name": data["exam_name"], "roll_number": data["roll_number"]},
+            {"$set": data},
+            upsert=True
+        )
+
+        return jsonify({"message": "Report saved successfully ✅"}), 200
+
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error saving report: {e}")
         return jsonify({"error": "Failed to save the report"}), 500
 
+# ------------------------
+# ✅ Fetch Reports (sorted by latest first)
+# ------------------------
+@app.route("/reports", methods=["GET"])
+def get_reports():
+    try:
+        reports = list(
+            reports_collection.find({}, {"_id": 0}).sort("created_at", -1)
+        )
+        return jsonify(reports), 200
+    except Exception as e:
+        print(f"Error fetching reports: {e}")
+        return jsonify({"error": "Failed to fetch reports"}), 500
 
+
+# ------------------------
+# Reset teacher answers
+# ------------------------
 @app.route("/reset/teacher", methods=["GET"])
 def reset_teacher():
     global teacher_answers
