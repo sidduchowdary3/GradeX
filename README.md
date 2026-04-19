@@ -49,31 +49,14 @@ The system follows a modular pipeline:
 
 ## ⚙️ Tech Stack
 
-### 🔹 Backend
-- Python
-- Flask
-
-### 🔹 NLP
-- Sentence-BERT (SBERT)
-- Hugging Face Transformers
-- NLTK
-
-### 🔹 Computer Vision
-- OpenCV
-- ORB
-- DINO
-- CLIP
-
-### 🔹 OCR
-- Tesseract OCR
-- Vision-based OCR (Gemini API)
-
-### 🔹 Database
-- MongoDB
-
-### 🔹 Frontend
-- HTML, CSS, JavaScript / React
-
+| Category              | Technologies Used |
+|----------------------|------------------|
+| 🔹 Backend           | Python, Flask |
+| 🔹 NLP               | Sentence-BERT (SBERT), Hugging Face Transformers, NLTK |
+| 🔹 Computer Vision   | OpenCV, ORB, DINO, CLIP |
+| 🔹 OCR               | Tesseract OCR, Vision-based OCR (Gemini API) |
+| 🔹 Database          | MongoDB |
+| 🔹 Frontend          | HTML, CSS, JavaScript / React |
 ---
 
 ## 📊 How It Works
@@ -81,31 +64,6 @@ The system follows a modular pipeline:
 - Text is evaluated based on meaning, not keywords  
 - Diagrams are evaluated based on structure + semantics  
 - Final score reflects overall understanding  
-
----
-
-## 📦 Installation & Setup
-
-### 1. Clone the Repository
-```bash
-git clone https://github.com/your-username/gradex.git
-cd gradex
-
-### 2. Create Virtual Environment
-```bash
-python -m venv venv
-
-# Windows
-venv\Scripts\activate
-
-# Linux/Mac
-source venv/bin/activate
-
-## 🧪 Testing
-- Unit Testing (OCR, NLP, CV modules)  
-- Integration Testing  
-- Dataset Testing (handwritten answers)  
-- End-to-End Testing  
 
 ---
 
