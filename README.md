@@ -91,6 +91,27 @@ The system follows a modular pipeline:
 
 ---
 
+
+---
+
+## 📄 Paper Acceptance  
+
+<p align="center">
+  <b>🎉 Accepted at ICIRCA 2026 🎉</b>
+</p>
+
+<p align="center">
+  <i>
+  "GradeX: A Multimodal AI System for Automated Student Answer Evaluation"
+  </i>
+</p>
+
+<p align="center">
+  Our research work has been officially accepted at the <b>ICIRCA 2026 Conference</b>,  
+  recognizing its contribution to AI-based automated evaluation systems.
+</p>
+
+---
 ## 👨‍💻 Contributors
 
 | Name                         | Email                     |
@@ -101,11 +122,3 @@ The system follows a modular pipeline:
 | Sd. Latheef Ahmmad          | Syedlatheefahmmad7@gmail.com  |
 
 ---
-
-## 📄 Paper Acceptance  
-
-We are proud to announce that our research paper titled  
-**"GradeX: A Multimodal AI System for Automated Student Answer Evaluation"**  
-has been **accepted for presentation at the ICIRCA 2026 Conference** 🎉  
-
-This achievement highlights the project’s contribution to advancing **AI-driven educational technologies**, particularly in automating and improving the evaluation of student responses.  
