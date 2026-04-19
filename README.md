@@ -99,3 +99,13 @@ The system follows a modular pipeline:
 | P. Harshavardhan            | Harshabambu@gmail.com  |
 | S. Mohit                    | sasanammohit123@gmail.com  |
 | Sd. Latheef Ahmmad          | Syedlatheefahmmad7@gmail.com  |
+
+---
+
+## 📄 Paper Acceptance  
+
+We are proud to announce that our research paper titled  
+**"GradeX: A Multimodal AI System for Automated Student Answer Evaluation"**  
+has been **accepted for presentation at the ICIRCA 2026 Conference** 🎉  
+
+This achievement highlights the project’s contribution to advancing **AI-driven educational technologies**, particularly in automating and improving the evaluation of student responses.  
