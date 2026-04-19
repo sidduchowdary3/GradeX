@@ -92,7 +92,10 @@ The system follows a modular pipeline:
 ---
 
 ## 👨‍💻 Contributors
-- Y. Siddhartha Sai Venkat  
-- P. Harshavardhan  
-- S. Mohit  
-- Sd. Latheef Ahmmad  
+
+| Name                         | Email                     |
+|------------------------------|--------------------------|
+| Y. Siddhartha Sai Venkat     | sidduyalamanchili3@gmail.com  |
+| P. Harshavardhan            | Harshabambu@gmail.com  |
+| S. Mohit                    | sasanammohit123@gmail.com  |
+| Sd. Latheef Ahmmad          | Syedlatheefahmmad7@gmail.com  |
