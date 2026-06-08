@@ -6,6 +6,10 @@ GradeX is an intelligent, AI-powered system designed to automatically evaluate h
 Traditional evaluation is slow and subjective. GradeX provides a scalable, automated, and accurate solution for modern educational needs.
 
 ---
+## 🎥 Live Implementation Video
+
+👉 https://drive.google.com/file/d/1v2SflbD-Zk9zEIQaSzWCYI-SKp6dCrCf/view?usp=sharing
+---
 
 ## 🎯 Key Features
 
